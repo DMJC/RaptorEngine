@@ -20,8 +20,12 @@ class HeadState;
 		#endif
 	#endif
 	
-	#include <openvr.h>
-	
+	#ifdef DEBIAN
+		#include <openvr/openvr.h>
+	#else
+		#include <openvr.h>
+	#endif
+
 	#ifdef nullptr
 		#undef nullptr
 	#endif

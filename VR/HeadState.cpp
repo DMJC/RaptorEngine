@@ -137,7 +137,13 @@ void HeadState::Recenter( void )
 {
 #ifndef NO_VR
 	if( VR )
+	{
+	#ifdef DEBIAN
+		vr::VRChaperone()->ResetZeroPose( vr::TrackingUniverseSeated );
+	#else
 		vr::VRSystem()->ResetSeatedZeroPose();
+	#endif
+	}
 #endif
 	
 	Basis.SetPos(0,0,0);
