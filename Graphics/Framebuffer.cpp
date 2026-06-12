@@ -21,6 +21,7 @@ Framebuffer::Framebuffer( int x, int y, GLint texture_filter )
 	AllocW = 0;
 	AllocH = 0;
 	OffsetX = 0;
+	VRProjection = false;
 	
 	W = x ? x : FRAMEBUFFER_DEFAULT_RES;
 	H = y ? y : W;
@@ -313,19 +314,29 @@ void Framebuffer::Setup3D( double fov_w, double cam_x, double cam_y, double cam_
 
 void Framebuffer::Setup3D( double fov_w, double cam_x, double cam_y, double cam_z, double cam_look_x, double cam_look_y, double cam_look_z, double cam_up_x, double cam_up_y, double cam_up_z )
 {
-	float aspect_ratio = (W + abs(OffsetX)) / (float) H;
-	
-	// If we pass FOV=0, calculate a good default.  4:3 is FOV 80, widescreen is scaled appropriately.
-	if( fov_w == 0. )
-		fov_w = 60. * aspect_ratio;
-	// If we pass FOV<0, treat its absolute value as fov_h.
-	else if( fov_w < 0. )
-		fov_w *= -aspect_ratio;
-	
 	glEnable( GL_DEPTH_TEST );
 	glMatrixMode( GL_PROJECTION );
 	glLoadIdentity();
-	gluPerspective( fov_w / aspect_ratio, aspect_ratio, Raptor::Game->Gfx.ZNear, Raptor::Game->Gfx.ZFar );
+
+	if( VRProjection )
+	{
+		// Use the headset's own per-eye projection matrix (asymmetric frustum, correct FOV).
+		glMultMatrixd( VRProjectionMatrix );
+	}
+	else
+	{
+		float aspect_ratio = (W + abs(OffsetX)) / (float) H;
+
+		// If we pass FOV=0, calculate a good default.  4:3 is FOV 80, widescreen is scaled appropriately.
+		if( fov_w == 0. )
+			fov_w = 60. * aspect_ratio;
+		// If we pass FOV<0, treat its absolute value as fov_h.
+		else if( fov_w < 0. )
+			fov_w *= -aspect_ratio;
+
+		gluPerspective( fov_w / aspect_ratio, aspect_ratio, Raptor::Game->Gfx.ZNear, Raptor::Game->Gfx.ZFar );
+	}
+
 	glMatrixMode( GL_MODELVIEW );
 	glLoadIdentity();
 	gluLookAt( cam_x, cam_y, cam_z,  cam_look_x, cam_look_y, cam_look_z,  cam_up_x, cam_up_y, cam_up_z );

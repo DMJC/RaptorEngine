@@ -118,8 +118,6 @@ void ClientConfig::SetDefaults( void )
 	Settings[ "vr_enable" ] = "false";
 	Settings[ "vr_mirror" ] = "true";
 	Settings[ "vr_fov" ] = "-111";
-	Settings[ "vr_separation" ] = "0.0625";
-	Settings[ "vr_offset" ] = "87";
 	Settings[ "vr_ui_scale" ] = "1";
 	
 	Settings[ "joy_deadzone" ] = "0.04";

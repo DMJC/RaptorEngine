@@ -56,4 +56,9 @@ public:
 	
 	void Recenter( void );
 	void Draw( void );
+
+#ifndef NO_VR
+	void SetEyeProjection( Framebuffer *eye, vr::EVREye which_eye );
+	void OffsetEye( vr::EVREye which_eye );
+#endif
 };

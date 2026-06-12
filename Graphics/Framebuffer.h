@@ -26,6 +26,8 @@ public:
 	float AspectRatio;
 	bool ForcePowerOfTwo;
 	Clock LoadedTime;
+	bool VRProjection;
+	double VRProjectionMatrix[ 16 ];
 	
 	Framebuffer( int x = FRAMEBUFFER_DEFAULT_RES, int y = 0, GLint texture_filter = GL_LINEAR );
 	virtual ~Framebuffer();

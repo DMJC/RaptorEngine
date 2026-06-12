@@ -195,22 +195,27 @@ void HeadState::Draw( void )
 	Raptor::Game->Cam.Offset.SetUpVec( Current.Up.X, Current.Up.Y, Current.Up.Z );
 	Raptor::Game->Cam.Offset.SetFwdVec( Current.Fwd.X, Current.Fwd.Y, Current.Fwd.Z );
 	
+	// Remember the head-centered camera position so each eye can offset from the same origin.
+	double head_x = Raptor::Game->Cam.Offset.X;
+	double head_y = Raptor::Game->Cam.Offset.Y;
+	double head_z = Raptor::Game->Cam.Offset.Z;
+
 	// Left Eye
-	double separation = Raptor::Game->Cfg.SettingAsDouble( "vr_separation", 0.0625 );
-	EyeL->OffsetX = Raptor::Game->Cfg.SettingAsInt( "vr_offset", 87 );
-	Raptor::Game->Cam.Offset.MoveAlong( &(Raptor::Game->Cam.Offset.Right), separation / -2. );
+	SetEyeProjection( EyeL, vr::Eye_Left );
+	OffsetEye( vr::Eye_Left );
 	Raptor::Game->Gfx.DrawTo = EyeL;
 	Raptor::Game->Gfx.SelectDefaultFramebuffer();
 	Raptor::Game->Draw();
 	vr::Texture_t leftEyeTexture = { (void*)(uintptr_t)(EyeL->Texture), vr::TextureType_OpenGL, vr::ColorSpace_Gamma };
 	vr::VRCompositor()->Submit( vr::Eye_Left, &leftEyeTexture );
-	
+
 	double frame_time = Raptor::Game->FrameTime;
 	Raptor::Game->FrameTime = 0.;  // Prevent multi-render side effects.
-	
+
 	// Right Eye
-	EyeR->OffsetX = -(EyeL->OffsetX);
-	Raptor::Game->Cam.Offset.MoveAlong( &(Raptor::Game->Cam.Offset.Right), separation );
+	Raptor::Game->Cam.Offset.SetPos( head_x, head_y, head_z );
+	SetEyeProjection( EyeR, vr::Eye_Right );
+	OffsetEye( vr::Eye_Right );
 	Raptor::Game->Gfx.DrawTo = EyeR;
 	Raptor::Game->Gfx.SelectDefaultFramebuffer();
 	Raptor::Game->Draw();
@@ -223,3 +228,30 @@ void HeadState::Draw( void )
 	Raptor::Game->Gfx.SelectDefaultFramebuffer();
 #endif
 }
+
+
+#ifndef NO_VR
+void HeadState::SetEyeProjection( Framebuffer *eye, vr::EVREye which_eye )
+{
+	// Ask the headset for this eye's real (asymmetric) projection, rather than guessing with FOV/vr_offset.
+	vr::HmdMatrix44_t proj = m_pHMD->GetProjectionMatrix( which_eye, Raptor::Game->Gfx.ZNear, Raptor::Game->Gfx.ZFar );
+
+	eye->VRProjection = true;
+	for( int row = 0; row < 4; row ++ )
+	{
+		for( int col = 0; col < 4; col ++ )
+			eye->VRProjectionMatrix[ col * 4 + row ] = proj.m[ row ][ col ];
+	}
+}
+
+
+void HeadState::OffsetEye( vr::EVREye which_eye )
+{
+	// Ask the headset for this eye's position relative to the head, rather than guessing with vr_separation.
+	vr::HmdMatrix34_t eye_to_head = m_pHMD->GetEyeToHeadTransform( which_eye );
+
+	Raptor::Game->Cam.Offset.MoveAlong( &(Raptor::Game->Cam.Offset.Fwd),   -(eye_to_head.m[ 2 ][ 3 ]) );
+	Raptor::Game->Cam.Offset.MoveAlong( &(Raptor::Game->Cam.Offset.Up),      eye_to_head.m[ 1 ][ 3 ]  );
+	Raptor::Game->Cam.Offset.MoveAlong( &(Raptor::Game->Cam.Offset.Right),   eye_to_head.m[ 0 ][ 3 ]  );
+}
+#endif
