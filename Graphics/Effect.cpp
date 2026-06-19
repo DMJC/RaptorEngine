@@ -107,10 +107,8 @@ void Effect::Draw( void )
 	if( Lifetime.Progress() < 1. )
 		return;
 	
-	glEnable( GL_TEXTURE_2D );
-	glBindTexture( GL_TEXTURE_2D, Anim.CurrentFrame() );
-	glColor4f( Red, Green, Blue, Alpha );
-	
+	Raptor::Game->Gfx.BindTexture( Anim.CurrentFrame() );
+
 	// Calculate corners.
 	Vec3D tl = Raptor::Game->Cam.Up * Size/2. - Raptor::Game->Cam.Right * Width/2.;
 	Vec3D tr = tl + Raptor::Game->Cam.Right * Width;
@@ -120,27 +118,28 @@ void Effect::Draw( void )
 	tr.RotateAround( &(Raptor::Game->Cam.Fwd), Rotation );
 	br.RotateAround( &(Raptor::Game->Cam.Fwd), Rotation + 180. );
 	bl.RotateAround( &(Raptor::Game->Cam.Fwd), Rotation + 180. );
-	
-	glBegin( GL_QUADS );
-		
+
+	DynamicBatch &Batch = Raptor::Game->Gfx.Batch;
+	Batch.Begin( GL_QUADS );
+		Batch.Color4f( Red, Green, Blue, Alpha );
+
 		// Top-left
-		glTexCoord2i( 0, 0 );
-		glVertex3d( X + tl.X, Y + tl.Y, Z + tl.Z );
-		
+		Batch.TexCoord2i( 0, 0 );
+		Batch.Vertex3d( X + tl.X, Y + tl.Y, Z + tl.Z );
+
 		// Bottom-left
-		glTexCoord2i( 0, 1 );
-		glVertex3d( X + bl.X, Y + bl.Y, Z + bl.Z );
-		
+		Batch.TexCoord2i( 0, 1 );
+		Batch.Vertex3d( X + bl.X, Y + bl.Y, Z + bl.Z );
+
 		// Bottom-right
-		glTexCoord2i( 1, 1 );
-		glVertex3d( X + br.X, Y + br.Y, Z + br.Z );
-		
+		Batch.TexCoord2i( 1, 1 );
+		Batch.Vertex3d( X + br.X, Y + br.Y, Z + br.Z );
+
 		// Top-right
-		glTexCoord2i( 1, 0 );
-		glVertex3d( X + tr.X, Y + tr.Y, Z + tr.Z );
-		
-	glEnd();
-	
-	glDisable( GL_TEXTURE_2D );
-	glColor4f( 1.f, 1.f, 1.f, 1.f );
+		Batch.TexCoord2i( 1, 0 );
+		Batch.Vertex3d( X + tr.X, Y + tr.Y, Z + tr.Z );
+
+	Batch.End();
+
+	Raptor::Game->Gfx.BindTexture( 0 );
 }

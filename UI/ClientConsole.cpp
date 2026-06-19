@@ -87,7 +87,7 @@ void ClientConsole::Draw( void )
 {
 	if( Active )
 	{
-		glPushMatrix();
+		Raptor::Game->Gfx.PushMatrix();
 		
 		UpdateRects();
 		DrawSetup();
@@ -165,7 +165,7 @@ void ClientConsole::Draw( void )
 		
 		DrawElements();
 		
-		glPopMatrix();
+		Raptor::Game->Gfx.PopMatrix();
 	}
 }
 

@@ -113,17 +113,23 @@ public:
 	GLfloat *TangentArray, *BitangentArray;
 	int *SmoothGroups;
 	bool Allocated, AllocatedWorldSpace;
-	
+
+	GLuint VertexArrayObject;
+	GLuint VertexBuffer, TexCoordBuffer, NormalBuffer, TangentBuffer, BitangentBuffer;
+	bool BuffersAllocated, BuffersDirty;
+
 	ModelArrays( void );
 	ModelArrays( const ModelArrays &other );
 	ModelArrays( const ModelArrays *other );
 	virtual ~ModelArrays();
-	
+
 	void Clear( void );
 	void BecomeCopy( void );
 	void BecomeCopy( const ModelArrays *other );
 	void BecomeInstance( const ModelArrays *other );
 	void Resize( size_t vertex_count );
+	void UploadBuffers( void );
+	void FreeBuffers( void );
 	void AddFaces( std::vector<ModelFace> &faces );
 	void RemoveFace( size_t face_index );
 	void CalculateNormals( size_t start_vertex = 0 );

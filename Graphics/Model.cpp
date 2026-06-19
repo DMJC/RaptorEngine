@@ -689,6 +689,8 @@ void Model::MakeMaterialArrays( void )
 					vertices_filled += array_iter->second->VertexCount;
 				}
 			}
+
+			mtl_iter->second->Arrays.BuffersDirty = true;
 		}
 	}
 }
@@ -736,32 +738,25 @@ void Model::Optimize( double vertex_tolerance, double normal_tolerance, double d
 void Model::Draw( const Pos3D *pos, const std::set<std::string> *object_names, const Color *wireframe, double exploded, int explosion_seed, double fwd_scale, double up_scale, double right_scale )
 {
 	bool use_shaders = Raptor::Game->ShaderMgr.Active();
-	GLint tangent_loc = -1, bitangent_loc = -1;
-	if( use_shaders )
-	{
-		tangent_loc   = Raptor::Game->ShaderMgr.AttribLoc( "BumpTangent"   );
-		bitangent_loc = Raptor::Game->ShaderMgr.AttribLoc( "BumpBitangent" );
-	}
-	bool use_bumpmap = (tangent_loc >= 0) && (bitangent_loc >= 0) && (Raptor::Game->Gfx.LightQuality >= 3);
+	GLint tangent_loc = 4, bitangent_loc = 5;
+	bool use_bumpmap = use_shaders && (Raptor::Game->Gfx.LightQuality >= 3);
 	
 	Pos3D zero;
 	if( ! pos )
 		pos = &zero;
 	
-	glEnableClientState( GL_VERTEX_ARRAY );
+	glEnableVertexAttribArray( 0 );
 	
 	if( ! wireframe )
 	{
-		glEnable( GL_TEXTURE_2D );
-		glEnableClientState( GL_TEXTURE_COORD_ARRAY );
-		glEnableClientState( GL_NORMAL_ARRAY );
-		glColor4f( 1.f, 1.f, 1.f, 1.f );
+		Raptor::Game->Gfx.TextureEnabled = true;
+		glEnableVertexAttribArray( 1 );
+		glEnableVertexAttribArray( 2 );
 	}
 	else
 	{
 		glPolygonMode( GL_FRONT_AND_BACK, GL_LINE );
-		glColor4f( wireframe->Red, wireframe->Green, wireframe->Blue, wireframe->Alpha );
-		
+
 		if( use_shaders )
 		{
 			Raptor::Game->ShaderMgr.Set3f( "AmbientColor", wireframe->Red, wireframe->Green, wireframe->Blue );
@@ -785,7 +780,7 @@ void Model::Draw( const Pos3D *pos, const std::set<std::string> *object_names, c
 			Vec3D y_vec( pos->Fwd.Y * fwd_scale, pos->Up.Y * up_scale, pos->Right.Y * right_scale );
 			Vec3D z_vec( pos->Fwd.Z * fwd_scale, pos->Up.Z * up_scale, pos->Right.Z * right_scale );
 			
-			Raptor::Game->ShaderMgr.Set3f( "Pos", pos->X, pos->Y, pos->Z );
+			Raptor::Game->ShaderMgr.Set3f( "Pos", pos->X - Raptor::Game->Gfx.CamX, pos->Y - Raptor::Game->Gfx.CamY, pos->Z - Raptor::Game->Gfx.CamZ );
 			Raptor::Game->ShaderMgr.Set3f( "XVec", x_vec.X, x_vec.Y, x_vec.Z );
 			Raptor::Game->ShaderMgr.Set3f( "YVec", y_vec.X, y_vec.Y, y_vec.Z );
 			Raptor::Game->ShaderMgr.Set3f( "ZVec", z_vec.X, z_vec.Y, z_vec.Z );
@@ -793,18 +788,35 @@ void Model::Draw( const Pos3D *pos, const std::set<std::string> *object_names, c
 		
 		for( std::map<std::string,ModelMaterial*>::iterator mtl_iter = Materials.begin(); mtl_iter != Materials.end(); mtl_iter ++ )
 		{
-			if( mtl_iter->second->Arrays.VertexCount )
+			ModelArrays &arrays = mtl_iter->second->Arrays;
+
+			if( arrays.VertexCount )
 			{
 				if( use_shaders )
 				{
+					if( arrays.BuffersDirty )
+						arrays.UploadBuffers();
+
+					glBindVertexArray( arrays.VertexArrayObject );
+
+					// Each model's VAO starts with all arrays disabled; enable the ones we use.
+					glEnableVertexAttribArray( 0 );
+					if( ! wireframe )
+					{
+						glEnableVertexAttribArray( 1 );
+						glEnableVertexAttribArray( 2 );
+					}
+
 					// FIXME: Pull this out of the loop, or enable different shader per material?
 					if( tangent_loc >= 0 )
 						glEnableVertexAttribArray( tangent_loc );
 					if( bitangent_loc >= 0 )
 						glEnableVertexAttribArray( bitangent_loc );
-					
-					glVertexPointer( 3, GL_DOUBLE, 0, mtl_iter->second->Arrays.VertexArray );
-					
+
+					glBindBuffer( GL_ARRAY_BUFFER, arrays.VertexBuffer );
+					glVertexAttribPointer( 0, 3, GL_DOUBLE, GL_FALSE, 0, (void*) 0 );
+					glBindBuffer( GL_ARRAY_BUFFER, 0 );
+
 					if( ! wireframe )
 					{
 						Raptor::Game->ShaderMgr.Set3f( "AmbientColor",  mtl_iter->second->Ambient.Red,  mtl_iter->second->Ambient.Green,  mtl_iter->second->Ambient.Blue );
@@ -822,17 +834,27 @@ void Model::Draw( const Pos3D *pos, const std::set<std::string> *object_names, c
 						if( use_bumpmap && mtl_iter->second->BumpMap.Frames.size() )
 						{
 							glBindTexture( GL_TEXTURE_2D, mtl_iter->second->BumpMap.CurrentFrame() );
-							glVertexAttribPointer( tangent_loc,   3, GL_FLOAT, GL_TRUE, 0, mtl_iter->second->Arrays.TangentArray );
-							glVertexAttribPointer( bitangent_loc, 3, GL_FLOAT, GL_TRUE, 0, mtl_iter->second->Arrays.BitangentArray );
+							glBindBuffer( GL_ARRAY_BUFFER, arrays.TangentBuffer );
+							glVertexAttribPointer( tangent_loc,   3, GL_FLOAT, GL_TRUE, 0, (void*) 0 );
+							glBindBuffer( GL_ARRAY_BUFFER, arrays.BitangentBuffer );
+							glVertexAttribPointer( bitangent_loc, 3, GL_FLOAT, GL_TRUE, 0, (void*) 0 );
+							glBindBuffer( GL_ARRAY_BUFFER, 0 );
 							Raptor::Game->ShaderMgr.Set1f( "BumpScale", mtl_iter->second->BumpScale );
 						}
 						else
 						{
 							glBindTexture( GL_TEXTURE_2D, 0 );
 							if( tangent_loc >= 0 )
-								glVertexAttribPointer( tangent_loc,   3, GL_FLOAT, GL_TRUE, 0, mtl_iter->second->Arrays.NormalArray );
+							{
+								glBindBuffer( GL_ARRAY_BUFFER, arrays.NormalBuffer );
+								glVertexAttribPointer( tangent_loc,   3, GL_FLOAT, GL_TRUE, 0, (void*) 0 );
+							}
 							if( bitangent_loc >= 0 )
-								glVertexAttribPointer( bitangent_loc, 3, GL_FLOAT, GL_TRUE, 0, mtl_iter->second->Arrays.NormalArray );
+							{
+								glBindBuffer( GL_ARRAY_BUFFER, arrays.NormalBuffer );
+								glVertexAttribPointer( bitangent_loc, 3, GL_FLOAT, GL_TRUE, 0, (void*) 0 );
+							}
+							glBindBuffer( GL_ARRAY_BUFFER, 0 );
 							Raptor::Game->ShaderMgr.Set1f( "BumpScale", 0. );
 						}
 						
@@ -855,21 +877,32 @@ void Model::Draw( const Pos3D *pos, const std::set<std::string> *object_names, c
 				else
 				{
 					// Calculate worldspace coordinates on the CPU (slow for complex models).
-					mtl_iter->second->Arrays.MakeWorldSpace( pos, fwd_scale, up_scale, right_scale );
-					
-					glVertexPointer( 3, GL_DOUBLE, 0, mtl_iter->second->Arrays.WorldSpaceVertexArray );
+					arrays.MakeWorldSpace( pos, fwd_scale, up_scale, right_scale );
+
+					if( arrays.BuffersDirty )
+						arrays.UploadBuffers();
+					glBindBuffer( GL_ARRAY_BUFFER, arrays.VertexBuffer );
+					glBufferData( GL_ARRAY_BUFFER, arrays.VertexCount * 3 * sizeof(GLdouble), arrays.WorldSpaceVertexArray, GL_STREAM_DRAW );
+					glVertexAttribPointer( 0, 3, GL_DOUBLE, GL_FALSE, 0, (void*) 0 );
+					glBindBuffer( GL_ARRAY_BUFFER, 0 );
 				}
-				
+
 				if( ! wireframe )
 				{
 					glBindTexture( GL_TEXTURE_2D, mtl_iter->second->Texture.CurrentFrame() );
-					
-					glTexCoordPointer( 2, GL_FLOAT, 0, mtl_iter->second->Arrays.TexCoordArray );
-					glNormalPointer( GL_FLOAT, 0, mtl_iter->second->Arrays.NormalArray );
+
+					glBindBuffer( GL_ARRAY_BUFFER, arrays.TexCoordBuffer );
+					glVertexAttribPointer( 1, 2, GL_FLOAT, GL_FALSE, 0, (void*) 0 );
+					glBindBuffer( GL_ARRAY_BUFFER, arrays.NormalBuffer );
+					glVertexAttribPointer( 2, 3, GL_FLOAT, GL_FALSE, 0, (void*) 0 );
+					glBindBuffer( GL_ARRAY_BUFFER, 0 );
 				}
-				
-				glDrawArrays( GL_TRIANGLES, 0, mtl_iter->second->Arrays.VertexCount );
-				
+
+				glDrawArrays( GL_TRIANGLES, 0, arrays.VertexCount );
+
+				if( use_shaders )
+					glBindVertexArray( 0 );
+
 				// FIXME: Pull this out of the loop, or enable different shader per material?
 				if( tangent_loc >= 0 )
 					glDisableVertexAttribArray( tangent_loc );
@@ -929,7 +962,7 @@ void Model::Draw( const Pos3D *pos, const std::set<std::string> *object_names, c
 				y_vec.Set( draw_pos.Fwd.Y * fwd_scale, draw_pos.Up.Y * up_scale, draw_pos.Right.Y * right_scale );
 				z_vec.Set( draw_pos.Fwd.Z * fwd_scale, draw_pos.Up.Z * up_scale, draw_pos.Right.Z * right_scale );
 				
-				Raptor::Game->ShaderMgr.Set3f( "Pos", draw_pos.X, draw_pos.Y, draw_pos.Z );
+				Raptor::Game->ShaderMgr.Set3f( "Pos", draw_pos.X - Raptor::Game->Gfx.CamX, draw_pos.Y - Raptor::Game->Gfx.CamY, draw_pos.Z - Raptor::Game->Gfx.CamZ );
 				Raptor::Game->ShaderMgr.Set3f( "XVec", x_vec.X, x_vec.Y, x_vec.Z );
 				Raptor::Game->ShaderMgr.Set3f( "YVec", y_vec.X, y_vec.Y, y_vec.Z );
 				Raptor::Game->ShaderMgr.Set3f( "ZVec", z_vec.X, z_vec.Y, z_vec.Z );
@@ -941,12 +974,25 @@ void Model::Draw( const Pos3D *pos, const std::set<std::string> *object_names, c
 				{
 					if( use_shaders )
 					{
+						if( array_iter->second->BuffersDirty )
+							array_iter->second->UploadBuffers();
+
+						glBindVertexArray( array_iter->second->VertexArrayObject );
+
+						// Each model's VAO starts with all arrays disabled; enable the ones we use.
+						glEnableVertexAttribArray( 0 );
+						if( ! wireframe )
+						{
+							glEnableVertexAttribArray( 1 );
+							glEnableVertexAttribArray( 2 );
+						}
+
 						// FIXME: Pull this out of the loop, or enable different shader per material?
 						if( tangent_loc >= 0 )
 							glEnableVertexAttribArray( tangent_loc );
 						if( bitangent_loc >= 0 )
 							glEnableVertexAttribArray( bitangent_loc );
-						
+
 						if( ! wireframe )
 						{
 							if( ! Materials[ array_iter->first ] )
@@ -968,17 +1014,27 @@ void Model::Draw( const Pos3D *pos, const std::set<std::string> *object_names, c
 							if( use_bumpmap && mtl->BumpMap.Frames.size() )
 							{
 								glBindTexture( GL_TEXTURE_2D, mtl->BumpMap.CurrentFrame() );
-								glVertexAttribPointer( tangent_loc,   3, GL_FLOAT, GL_TRUE, 0, array_iter->second->TangentArray );
-								glVertexAttribPointer( bitangent_loc, 3, GL_FLOAT, GL_TRUE, 0, array_iter->second->BitangentArray );
+								glBindBuffer( GL_ARRAY_BUFFER, array_iter->second->TangentBuffer );
+								glVertexAttribPointer( tangent_loc,   3, GL_FLOAT, GL_TRUE, 0, (void*) 0 );
+								glBindBuffer( GL_ARRAY_BUFFER, array_iter->second->BitangentBuffer );
+								glVertexAttribPointer( bitangent_loc, 3, GL_FLOAT, GL_TRUE, 0, (void*) 0 );
+								glBindBuffer( GL_ARRAY_BUFFER, 0 );
 								Raptor::Game->ShaderMgr.Set1f( "BumpScale", mtl->BumpScale );
 							}
 							else
 							{
 								glBindTexture( GL_TEXTURE_2D, 0 );
 								if( tangent_loc >= 0 )
-									glVertexAttribPointer( tangent_loc,   3, GL_FLOAT, GL_TRUE, 0, array_iter->second->NormalArray );
+								{
+									glBindBuffer( GL_ARRAY_BUFFER, array_iter->second->NormalBuffer );
+									glVertexAttribPointer( tangent_loc,   3, GL_FLOAT, GL_TRUE, 0, (void*) 0 );
+								}
 								if( bitangent_loc >= 0 )
-									glVertexAttribPointer( bitangent_loc, 3, GL_FLOAT, GL_TRUE, 0, array_iter->second->NormalArray );
+								{
+									glBindBuffer( GL_ARRAY_BUFFER, array_iter->second->NormalBuffer );
+									glVertexAttribPointer( bitangent_loc, 3, GL_FLOAT, GL_TRUE, 0, (void*) 0 );
+								}
+								glBindBuffer( GL_ARRAY_BUFFER, 0 );
 								Raptor::Game->ShaderMgr.Set1f( "BumpScale", 0. );
 							}
 							
@@ -997,29 +1053,42 @@ void Model::Draw( const Pos3D *pos, const std::set<std::string> *object_names, c
 							
 							glActiveTexture( GL_TEXTURE0 + 0 ); // Texture
 						}
-						
-						glVertexPointer( 3, GL_DOUBLE, 0, array_iter->second->VertexArray );
+
+						glBindBuffer( GL_ARRAY_BUFFER, array_iter->second->VertexBuffer );
+						glVertexAttribPointer( 0, 3, GL_DOUBLE, GL_FALSE, 0, (void*) 0 );
+						glBindBuffer( GL_ARRAY_BUFFER, 0 );
 					}
 					else
 					{
 						// Calculate worldspace coordinates on the CPU (slow for complex models).
 						array_iter->second->MakeWorldSpace( &draw_pos, fwd_scale, up_scale, right_scale );
-						
-						glVertexPointer( 3, GL_DOUBLE, 0, array_iter->second->WorldSpaceVertexArray );
+
+						if( array_iter->second->BuffersDirty )
+							array_iter->second->UploadBuffers();
+						glBindBuffer( GL_ARRAY_BUFFER, array_iter->second->VertexBuffer );
+						glBufferData( GL_ARRAY_BUFFER, array_iter->second->VertexCount * 3 * sizeof(GLdouble), array_iter->second->WorldSpaceVertexArray, GL_STREAM_DRAW );
+						glVertexAttribPointer( 0, 3, GL_DOUBLE, GL_FALSE, 0, (void*) 0 );
+						glBindBuffer( GL_ARRAY_BUFFER, 0 );
 					}
-					
+
 					if( ! wireframe )
 					{
 						if( ! Materials[ array_iter->first ] )
 							Materials[ array_iter->first ] = new ModelMaterial();
 						glBindTexture( GL_TEXTURE_2D, Materials[ array_iter->first ]->Texture.CurrentFrame() );
-						
-						glTexCoordPointer( 2, GL_FLOAT, 0, array_iter->second->TexCoordArray );
-						glNormalPointer( GL_FLOAT, 0, array_iter->second->NormalArray );
+
+						glBindBuffer( GL_ARRAY_BUFFER, array_iter->second->TexCoordBuffer );
+						glVertexAttribPointer( 1, 2, GL_FLOAT, GL_FALSE, 0, (void*) 0 );
+						glBindBuffer( GL_ARRAY_BUFFER, array_iter->second->NormalBuffer );
+						glVertexAttribPointer( 2, 3, GL_FLOAT, GL_FALSE, 0, (void*) 0 );
+						glBindBuffer( GL_ARRAY_BUFFER, 0 );
 					}
-					
+
 					glDrawArrays( GL_TRIANGLES, 0, array_iter->second->VertexCount );
-					
+
+					if( use_shaders )
+						glBindVertexArray( 0 );
+
 					// FIXME: Pull this out of the loop, or enable different shader per material?
 					if( tangent_loc >= 0 )
 						glDisableVertexAttribArray( tangent_loc );
@@ -1032,15 +1101,18 @@ void Model::Draw( const Pos3D *pos, const std::set<std::string> *object_names, c
 	
 	if( ! wireframe )
 	{
-		glDisableClientState( GL_NORMAL_ARRAY );
-		glDisableClientState( GL_TEXTURE_COORD_ARRAY );
-		glDisable( GL_TEXTURE_2D );
+		glDisableVertexAttribArray( 2 );
+		glDisableVertexAttribArray( 1 );
+		Raptor::Game->Gfx.TextureEnabled = false;
 	}
 	else
 		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 	
-	glDisableClientState( GL_VERTEX_ARRAY );
-	
+	glDisableVertexAttribArray( 0 );
+
+	glBindVertexArray( 0 );
+	glBindBuffer( GL_ARRAY_BUFFER, 0 );
+
 	if( use_shaders )
 	{
 		Raptor::Game->ShaderMgr.Set3f( "Pos", 0., 0., 0. );
@@ -1809,6 +1881,11 @@ ModelArrays::ModelArrays( void )
 	SmoothGroups = NULL;
 	Allocated = false;
 	AllocatedWorldSpace = false;
+
+	VertexArrayObject = 0;
+	VertexBuffer = TexCoordBuffer = NormalBuffer = TangentBuffer = BitangentBuffer = 0;
+	BuffersAllocated = false;
+	BuffersDirty = true;
 }
 
 
@@ -1824,7 +1901,12 @@ ModelArrays::ModelArrays( const ModelArrays &other )
 	SmoothGroups = NULL;
 	Allocated = false;
 	AllocatedWorldSpace = false;
-	
+
+	VertexArrayObject = 0;
+	VertexBuffer = TexCoordBuffer = NormalBuffer = TangentBuffer = BitangentBuffer = 0;
+	BuffersAllocated = false;
+	BuffersDirty = true;
+
 	BecomeInstance( &other );
 }
 
@@ -1841,7 +1923,12 @@ ModelArrays::ModelArrays( const ModelArrays *other )
 	SmoothGroups = NULL;
 	Allocated = false;
 	AllocatedWorldSpace = false;
-	
+
+	VertexArrayObject = 0;
+	VertexBuffer = TexCoordBuffer = NormalBuffer = TangentBuffer = BitangentBuffer = 0;
+	BuffersAllocated = false;
+	BuffersDirty = true;
+
 	BecomeInstance( other );
 }
 
@@ -1855,7 +1942,9 @@ ModelArrays::~ModelArrays()
 void ModelArrays::Clear( void )
 {
 	VertexCount = 0;
-	
+
+	FreeBuffers();
+
 	if( Allocated )
 	{
 		if( VertexArray )
@@ -1885,6 +1974,65 @@ void ModelArrays::Clear( void )
 		free( WorldSpaceVertexArray );
 	WorldSpaceVertexArray = NULL;
 	AllocatedWorldSpace = false;
+}
+
+
+void ModelArrays::FreeBuffers( void )
+{
+	if( BuffersAllocated )
+	{
+		glDeleteBuffers( 1, &VertexBuffer );
+		glDeleteBuffers( 1, &TexCoordBuffer );
+		glDeleteBuffers( 1, &NormalBuffer );
+		glDeleteBuffers( 1, &TangentBuffer );
+		glDeleteBuffers( 1, &BitangentBuffer );
+		glDeleteVertexArrays( 1, &VertexArrayObject );
+		BuffersAllocated = false;
+	}
+
+	VertexArrayObject = 0;
+	VertexBuffer = TexCoordBuffer = NormalBuffer = TangentBuffer = BitangentBuffer = 0;
+	BuffersDirty = true;
+}
+
+
+void ModelArrays::UploadBuffers( void )
+{
+	if( ! VertexCount )
+		return;
+
+	if( ! VertexArrayObject )
+	{
+		glGenVertexArrays( 1, &VertexArrayObject );
+		glGenBuffers( 1, &VertexBuffer );
+		glGenBuffers( 1, &TexCoordBuffer );
+		glGenBuffers( 1, &NormalBuffer );
+		glGenBuffers( 1, &TangentBuffer );
+		glGenBuffers( 1, &BitangentBuffer );
+		BuffersAllocated = true;
+	}
+
+	glBindVertexArray( VertexArrayObject );
+
+	glBindBuffer( GL_ARRAY_BUFFER, VertexBuffer );
+	glBufferData( GL_ARRAY_BUFFER, sizeof(GLdouble) * 3 * VertexCount, VertexArray, GL_STATIC_DRAW );
+
+	glBindBuffer( GL_ARRAY_BUFFER, TexCoordBuffer );
+	glBufferData( GL_ARRAY_BUFFER, sizeof(GLfloat) * 2 * VertexCount, TexCoordArray, GL_STATIC_DRAW );
+
+	glBindBuffer( GL_ARRAY_BUFFER, NormalBuffer );
+	glBufferData( GL_ARRAY_BUFFER, sizeof(GLfloat) * 3 * VertexCount, NormalArray, GL_STATIC_DRAW );
+
+	glBindBuffer( GL_ARRAY_BUFFER, TangentBuffer );
+	glBufferData( GL_ARRAY_BUFFER, sizeof(GLfloat) * 3 * VertexCount, TangentArray, GL_STATIC_DRAW );
+
+	glBindBuffer( GL_ARRAY_BUFFER, BitangentBuffer );
+	glBufferData( GL_ARRAY_BUFFER, sizeof(GLfloat) * 3 * VertexCount, BitangentArray, GL_STATIC_DRAW );
+
+	glBindBuffer( GL_ARRAY_BUFFER, 0 );
+	glBindVertexArray( 0 );
+
+	BuffersDirty = false;
 }
 
 
@@ -2018,8 +2166,9 @@ void ModelArrays::Resize( size_t vertex_count )
 		TangentArray   = (GLfloat*)(  TangentArray   ? realloc( TangentArray,     normal_array_mem )    : malloc( normal_array_mem )    );
 		BitangentArray = (GLfloat*)(  BitangentArray ? realloc( BitangentArray,   normal_array_mem )    : malloc( normal_array_mem )    );
 		SmoothGroups   = (int*)(      SmoothGroups   ? realloc( SmoothGroups,     smooth_group_mem )    : malloc( smooth_group_mem )    );
-		
+
 		Allocated = true;
+		BuffersDirty = true;
 	}
 	else
 		Clear();

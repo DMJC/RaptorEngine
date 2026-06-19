@@ -84,7 +84,7 @@ void ClientConfig::SetDefaults( void )
 	Settings[ "g_framebuffers" ] = "true";
 	Settings[ "g_framebuffers_anyres" ] = "true";
 	Settings[ "g_shader_enable" ] = "true";
-	Settings[ "g_shader_version" ] = "110";
+	Settings[ "g_shader_version" ] = "330";
 	Settings[ "g_shader_light_quality" ] = "4";
 	Settings[ "g_shader_point_lights" ] = "4";
 	Settings[ "g_shader_glowmap" ] = "true";

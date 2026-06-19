@@ -108,7 +108,7 @@ void MouseState::Draw( void )
 {
 	if( ShowCursor )
 	{
-		glPushMatrix();
+		Raptor::Game->Gfx.PushMatrix();
 		
 		// Set up UI rendering output.
 		Raptor::Game->Gfx.Setup2D();
@@ -116,14 +116,14 @@ void MouseState::Draw( void )
 		// Clamp the cursor texture.
 		GLuint texture = Cursor.CurrentFrame();
 		glBindTexture( GL_TEXTURE_2D, texture );
-		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP );
-		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 		
 		// Draw the cursor.
 		float ui_scale = std::max<float>( 1.f, Raptor::Game->UIScale );
 		Raptor::Game->Gfx.DrawRect2D( X - PointX * ui_scale, Y - PointY * ui_scale, X + (Size - PointX) * ui_scale, Y + (Size - PointY) * ui_scale, texture, 1.f, 1.f, 1.f, 1.f );
 		
-		glPopMatrix();
+		Raptor::Game->Gfx.PopMatrix();
 	}
 }
 

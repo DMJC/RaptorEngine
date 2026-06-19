@@ -9,6 +9,7 @@
 #include <cfloat>
 #include <string>
 #include "Num.h"
+#include "Mat4.h"
 #include "RaptorGame.h"
 
 
@@ -83,7 +84,6 @@ void Framebuffer::Initialize( void )
 	{
 		glGenTextures( 1, &Texture );
 		glBindTexture( GL_TEXTURE_2D, Texture );
-		glEnable( GL_TEXTURE_2D );
 		unsigned char raw[ 16 ] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 		glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, raw );
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, TextureFilter );
@@ -286,11 +286,14 @@ void Framebuffer::Setup2D( double y1, double y2 )
 void Framebuffer::Setup2D( double x1, double y1, double x2, double y2 )
 {
 	glDisable( GL_DEPTH_TEST );
-	glMatrixMode( GL_PROJECTION );
-	glLoadIdentity();
-	glOrtho( x1, x2, y2, y1, -1, 1 );
-	glMatrixMode( GL_MODELVIEW );
-	glLoadIdentity();
+	Raptor::Game->Gfx.CamX = Raptor::Game->Gfx.CamY = Raptor::Game->Gfx.CamZ = 0.;
+
+	if( VRProjection )
+		Raptor::Game->Gfx.ProjectionMatrix = Mat4::Translate( -VRProjectionMatrix[ 8 ], 0., 0. ) * Mat4::Ortho( x1, x2, y2, y1, -1, 1 );
+	else
+		Raptor::Game->Gfx.ProjectionMatrix = Mat4::Ortho( x1, x2, y2, y1, -1, 1 );
+	Raptor::Game->Gfx.ModelViewMatrix = Mat4::Identity();
+	Raptor::Game->Gfx.UploadMatrices();
 }
 
 
@@ -315,29 +318,22 @@ void Framebuffer::Setup3D( double fov_w, double cam_x, double cam_y, double cam_
 void Framebuffer::Setup3D( double fov_w, double cam_x, double cam_y, double cam_z, double cam_look_x, double cam_look_y, double cam_look_z, double cam_up_x, double cam_up_y, double cam_up_z )
 {
 	glEnable( GL_DEPTH_TEST );
-	glMatrixMode( GL_PROJECTION );
-	glLoadIdentity();
 
+	GLint viewport[ 4 ] = { 0, 0, 0, 0 };
 	if( VRProjection )
-	{
-		// Use the headset's own per-eye projection matrix (asymmetric frustum, correct FOV).
-		glMultMatrixd( VRProjectionMatrix );
-	}
+		glGetIntegerv( GL_VIEWPORT, viewport );
+
+	if( VRProjection && (viewport[ 2 ] == AllocW) && (viewport[ 3 ] == AllocH) )
+		Raptor::Game->Gfx.ProjectionMatrix = Mat4::FromColumnMajor( VRProjectionMatrix );
 	else
 	{
-		float aspect_ratio = (W + abs(OffsetX)) / (float) H;
-
-		// If we pass FOV=0, calculate a good default.  4:3 is FOV 80, widescreen is scaled appropriately.
-		if( fov_w == 0. )
-			fov_w = 60. * aspect_ratio;
-		// If we pass FOV<0, treat its absolute value as fov_h.
-		else if( fov_w < 0. )
-			fov_w *= -aspect_ratio;
-
-		gluPerspective( fov_w / aspect_ratio, aspect_ratio, Raptor::Game->Gfx.ZNear, Raptor::Game->Gfx.ZFar );
+		float ar = (W + abs(OffsetX)) / (float) H;
+		double fov = fov_w;
+		if( fov == 0. ) fov = 60. * ar;
+		else if( fov < 0. ) fov *= -ar;
+		Raptor::Game->Gfx.ProjectionMatrix = Mat4::Perspective( fov / ar, ar, Raptor::Game->Gfx.ZNear, Raptor::Game->Gfx.ZFar );
 	}
-
-	glMatrixMode( GL_MODELVIEW );
-	glLoadIdentity();
-	gluLookAt( cam_x, cam_y, cam_z,  cam_look_x, cam_look_y, cam_look_z,  cam_up_x, cam_up_y, cam_up_z );
+	Raptor::Game->Gfx.CamX = cam_x; Raptor::Game->Gfx.CamY = cam_y; Raptor::Game->Gfx.CamZ = cam_z;
+	Raptor::Game->Gfx.ModelViewMatrix = Mat4::LookAt( 0, 0, 0, cam_look_x - cam_x, cam_look_y - cam_y, cam_look_z - cam_z, cam_up_x, cam_up_y, cam_up_z );
+	Raptor::Game->Gfx.UploadMatrices();
 }

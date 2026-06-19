@@ -243,20 +243,15 @@ void ListBox::Draw( void )
 	UpdateRects();
 	
 	int x_offset = 0;
-	if( ! Raptor::Game->Gfx.DrawTo )
-		;
-	else if( Raptor::Game->Gfx.DrawTo == Raptor::Game->Head.EyeL )
-		x_offset = VRHeight;
-	else if( Raptor::Game->Gfx.DrawTo == Raptor::Game->Head.EyeR )
-		x_offset = -VRHeight;
 	
-	glColor4f( Red, Green, Blue, Alpha );
-	glBegin( GL_QUADS );
-		glVertex2i( x_offset, 0 );
-		glVertex2i( CalcRect.w + x_offset, 0 );
-		glVertex2i( CalcRect.w + x_offset, CalcRect.h );
-		glVertex2i( x_offset, CalcRect.h );
-	glEnd();
+	DynamicBatch &Batch = Raptor::Game->Gfx.Batch;
+	Batch.Begin( GL_QUADS );
+		Batch.Color4f( Red, Green, Blue, Alpha );
+		Batch.Vertex2i( x_offset, 0 );
+		Batch.Vertex2i( CalcRect.w + x_offset, 0 );
+		Batch.Vertex2i( CalcRect.w + x_offset, CalcRect.h );
+		Batch.Vertex2i( x_offset, CalcRect.h );
+	Batch.End();
 	
 	float ui_scale = UIScaleMode ? Raptor::Game->UIScale : 1.f;
 	int scaled_scroll_bar = ScrollBarSize * ui_scale + 0.5f;
@@ -271,13 +266,12 @@ void ListBox::Draw( void )
 		Raptor::Game->Gfx.DrawRect2D( CalcRect.w + x_offset - scaled_scroll_bar, (int)( scaled_scroll_bar + h * scroll_start ), CalcRect.w + x_offset, (int)( scaled_scroll_bar + h * (scroll_start + percent_displayed) ), 0, ScrollBarRed, ScrollBarGreen, ScrollBarBlue, ScrollBarAlpha );
 	}
 	
-	glPushMatrix();
-	glPushAttrib( GL_VIEWPORT_BIT );
-	if( Raptor::Game->Gfx.DrawTo )  // FIXME: Dirty hack to fix VR text positioning.  Find the real bug elsewhere, then remove this!
-		x_offset += ( ((CalcRect.x + CalcRect.w / 2.) / (double) Raptor::Game->Gfx.DrawTo->W) - 0.5 ) * 100.;  // Arbitrary adjustment that looks about right.
+	Raptor::Game->Gfx.PushMatrix();
+	GLint savedViewport[4];
+	glGetIntegerv( GL_VIEWPORT, savedViewport );
 	Raptor::Game->Gfx.SetViewport( CalcRect.x + x_offset, CalcRect.y, CalcRect.w - scaled_scroll_bar, CalcRect.h );
 	Raptor::Game->Gfx.Setup2D( 0, 0, CalcRect.w - scaled_scroll_bar, CalcRect.h );
-	
+
 	if( TextFont )
 	{
 		SDL_Rect text_rect;
@@ -295,9 +289,8 @@ void ListBox::Draw( void )
 		}
 	}
 	
-	glPopAttrib();
-	glPopMatrix();
-	glColor4f( 1.0f, 1.0f, 1.0f, 1.0f );
+	glViewport( savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3] );
+	Raptor::Game->Gfx.PopMatrix();
 }
 
 

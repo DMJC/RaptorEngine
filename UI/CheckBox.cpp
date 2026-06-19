@@ -28,36 +28,32 @@ CheckBox::~CheckBox()
 
 void CheckBox::Draw( void )
 {
-	// Need this to display a texture
-	glEnable( GL_TEXTURE_2D );
-	
 	// Bind the texture to which subsequent calls refer to
-	glBindTexture( GL_TEXTURE_2D, Image.CurrentFrame() );
-	
-	// Set the color.
-	glColor4f( Red, Green, Blue, Alpha );
-	
-	glBegin( GL_QUADS );
-		
+	Raptor::Game->Gfx.BindTexture( Image.CurrentFrame() );
+
+	DynamicBatch &Batch = Raptor::Game->Gfx.Batch;
+	Batch.Begin( GL_QUADS );
+		Batch.Color4f( Red, Green, Blue, Alpha );
+
 		// Top-left
-		glTexCoord2i( 0, 0 );
-		glVertex2i( 0, 0 );
-		
+		Batch.TexCoord2i( 0, 0 );
+		Batch.Vertex2i( 0, 0 );
+
 		// Bottom-left
-		glTexCoord2i( 0, 1 );
-		glVertex2i( 0, CalcRect.h );
-		
+		Batch.TexCoord2i( 0, 1 );
+		Batch.Vertex2i( 0, CalcRect.h );
+
 		// Bottom-right
-		glTexCoord2i( 1, 1 );
-		glVertex2i( CalcRect.h, CalcRect.h );
-		
+		Batch.TexCoord2i( 1, 1 );
+		Batch.Vertex2i( CalcRect.h, CalcRect.h );
+
 		// Top-right
-		glTexCoord2i( 1, 0 );
-		glVertex2i( CalcRect.h, 0 );
-		
-	glEnd();
-	
-	glDisable( GL_TEXTURE_2D );
+		Batch.TexCoord2i( 1, 0 );
+		Batch.Vertex2i( CalcRect.h, 0 );
+
+	Batch.End();
+
+	Raptor::Game->Gfx.BindTexture( 0 );
 	
 	
 	if( LabelFont )

@@ -11,6 +11,7 @@
 #include "ResourceManager.h"
 #include "ClientConfig.h"
 #include "RaptorGame.h"
+#include "Shader.h"
 
 
 Graphics::Graphics( void )
@@ -37,6 +38,11 @@ Graphics::Graphics( void )
 	
 	Screen = NULL;
 	DrawTo = NULL;
+	BatchShader = NULL;
+	TextureEnabled = false;
+	ProjectionMatrix = Mat4::Identity();
+	ModelViewMatrix = Mat4::Identity();
+	CamX = CamY = CamZ = 0.;
 }
 
 
@@ -171,6 +177,13 @@ void Graphics::SetMode( int x, int y, int bpp, bool fullscreen, int fsaa, int af
 	// Make sure we use hardware-accelerated double-buffered OpenGL.
 	SDL_GL_SetAttribute( SDL_GL_ACCELERATED_VISUAL, 1 );
 	SDL_GL_SetAttribute( SDL_GL_DOUBLEBUFFER, 1 );
+
+	// Request the highest OpenGL version we support; SetMode will fall back if context creation fails.
+	#if SDL_VERSION_ATLEAST(2,0,0)
+		SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 4 );
+		SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 6 );
+		SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
+	#endif
 	
 	// Set vsync.
 	#if SDL_VERSION_ATLEAST(2,0,0)
@@ -236,7 +249,26 @@ void Graphics::SetMode( int x, int y, int bpp, bool fullscreen, int fsaa, int af
 			screen_flags = SDL_WINDOW_FULLSCREEN;
 		Screen = SDL_CreateWindow( Raptor::Game->Game.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, x, y, SDL_WINDOW_OPENGL | screen_flags );
 		if( Screen )
-			SDL_GL_CreateContext( Screen );
+		{
+			SDL_GLContext gl_context = SDL_GL_CreateContext( Screen );
+
+			if( ! gl_context )
+			{
+				// The driver couldn't give us GL 4.6 core; try GL 3.3 core.
+				SDL_GL_SetAttribute( SDL_GL_CONTEXT_MAJOR_VERSION, 3 );
+				SDL_GL_SetAttribute( SDL_GL_CONTEXT_MINOR_VERSION, 3 );
+				SDL_GL_SetAttribute( SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE );
+				gl_context = SDL_GL_CreateContext( Screen );
+			}
+
+			if( gl_context )
+			{
+				const GLubyte *gl_version = glGetString( GL_VERSION );
+				const GLubyte *glsl_version = glGetString( GL_SHADING_LANGUAGE_VERSION );
+				Raptor::Game->Console.Print( std::string("OpenGL Version: ") + std::string( gl_version ? (const char *) gl_version : "Unknown" ) );
+				Raptor::Game->Console.Print( std::string("GLSL Version: ") + std::string( glsl_version ? (const char *) glsl_version : "Unknown" ) );
+			}
+		}
 	#else
 		Screen = SDL_SetVideoMode( x, y, bpp, SDL_OPENGL | SDL_ANYFORMAT | (Fullscreen ? SDL_FULLSCREEN : SDL_RESIZABLE) );
 	#endif
@@ -300,19 +332,17 @@ void Graphics::SetMode( int x, int y, int bpp, bool fullscreen, int fsaa, int af
 	glHint( GL_GENERATE_MIPMAP_HINT, GL_NICEST );
 	glHint( GL_TEXTURE_COMPRESSION_HINT, GL_NICEST );
 	glHint( GL_FRAGMENT_SHADER_DERIVATIVE_HINT, GL_NICEST );
-	glHint( GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST );
-	glHint( GL_POLYGON_SMOOTH_HINT, GL_NICEST );
-	glHint( GL_LINE_SMOOTH_HINT, GL_NICEST );
-	glHint( GL_POINT_SMOOTH_HINT, GL_NICEST );
-	glHint( GL_FOG_HINT, GL_NICEST );
-	
+
 	#ifdef GL_PROGRAM_POINT_SIZE
-		// Allow fixed-function point sizes.
-		glDisable( GL_PROGRAM_POINT_SIZE );
+		glEnable( GL_PROGRAM_POINT_SIZE );
 	#endif
 	
 	// Tell the ResourceManager to reload any previously-loaded textures and shaders.
 	Raptor::Game->Res.ReloadGraphics();
+
+	// Load the batch shader for DynamicBatch rendering.
+	BatchShader = Raptor::Game->Res.GetShader( "batch" );
+	Batch.FreeGPU();
 	
 	// Set the titlebar name.
 	#if SDL_VERSION_ATLEAST(2,0,0)
@@ -328,6 +358,10 @@ void Graphics::SetMode( int x, int y, int bpp, bool fullscreen, int fsaa, int af
 	glEnable( GL_BLEND );
 	glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 	
+	// Enable GL debug output in core profile.
+	glEnable( GL_DEBUG_OUTPUT );
+	glEnable( GL_DEBUG_OUTPUT_SYNCHRONOUS );
+
 	// Keep track of light quality for model drawing.
 	LightQuality = Raptor::Game->Cfg.SettingAsInt( "g_shader_light_quality", 4 );
 	
@@ -494,13 +528,12 @@ void Graphics::Setup2D( double x1, double y1, double x2, double y2 )
 		DrawTo->Setup2D( x1, y1, x2, y2 );
 		return;
 	}
-	
+
 	glDisable( GL_DEPTH_TEST );
-	glMatrixMode( GL_PROJECTION );
-	glLoadIdentity();
-	glOrtho( x1, x2, y2, y1, -1, 1 );
-	glMatrixMode( GL_MODELVIEW );
-	glLoadIdentity();
+	CamX = CamY = CamZ = 0.;
+	ProjectionMatrix = Mat4::Ortho( x1, x2, y2, y1, -1, 1 );
+	ModelViewMatrix = Mat4::Identity();
+	UploadMatrices();
 }
 
 
@@ -541,12 +574,10 @@ void Graphics::Setup3D( double fov_w, double cam_x, double cam_y, double cam_z, 
 		fov_w *= -aspect_ratio;
 	
 	glEnable( GL_DEPTH_TEST );
-	glMatrixMode( GL_PROJECTION );
-	glLoadIdentity();
-	gluPerspective( fov_w / aspect_ratio, aspect_ratio, ZNear, ZFar );
-	glMatrixMode( GL_MODELVIEW );
-	glLoadIdentity();
-	gluLookAt( cam_x, cam_y, cam_z,  cam_look_x, cam_look_y, cam_look_z,  cam_up_x, cam_up_y, cam_up_z );
+	CamX = cam_x; CamY = cam_y; CamZ = cam_z;
+	ProjectionMatrix = Mat4::Perspective( fov_w / aspect_ratio, aspect_ratio, ZNear, ZFar );
+	ModelViewMatrix = Mat4::LookAt( 0, 0, 0, cam_look_x - cam_x, cam_look_y - cam_y, cam_look_z - cam_z, cam_up_x, cam_up_y, cam_up_z );
+	UploadMatrices();
 }
 
 
@@ -556,88 +587,138 @@ void Graphics::Setup3D( double fov_w, double cam_x, double cam_y, double cam_z, 
 void Graphics::DrawRect2D( int x1, int y1, int x2, int y2, GLuint texture )
 {
 	if( texture )
-	{
-		glEnable( GL_TEXTURE_2D );
-		glBindTexture( GL_TEXTURE_2D, texture );
-	}
-	
-	glBegin( GL_QUADS );
-		
+		BindTexture( texture );
+
+	Batch.Begin( GL_QUADS );
+
 		// Top-left
 		if( texture )
-			glTexCoord2i( 0, 0 );
-		glVertex2i( x1, y1 );
-		
+			Batch.TexCoord2i( 0, 0 );
+		Batch.Vertex2i( x1, y1 );
+
 		// Bottom-left
 		if( texture )
-			glTexCoord2i( 0, 1 );
-		glVertex2i( x1, y2 );
-		
+			Batch.TexCoord2i( 0, 1 );
+		Batch.Vertex2i( x1, y2 );
+
 		// Bottom-right
 		if( texture )
-			glTexCoord2i( 1, 1 );
-		glVertex2i( x2, y2 );
-		
+			Batch.TexCoord2i( 1, 1 );
+		Batch.Vertex2i( x2, y2 );
+
 		// Top-right
 		if( texture )
-			glTexCoord2i( 1, 0 );
-		glVertex2i( x2, y1 );
-		
-	glEnd();
-	
+			Batch.TexCoord2i( 1, 0 );
+		Batch.Vertex2i( x2, y1 );
+
+	Batch.End();
+
 	if( texture )
-		glDisable( GL_TEXTURE_2D );
+		BindTexture( 0 );
 }
 
 
 void Graphics::DrawRect2D( double x1, double y1, double x2, double y2, GLuint texture )
 {
 	if( texture )
-	{
-		glEnable( GL_TEXTURE_2D );
-		glBindTexture( GL_TEXTURE_2D, texture );
-	}
-	
-	glBegin( GL_QUADS );
-		
+		BindTexture( texture );
+
+	Batch.Begin( GL_QUADS );
+
 		// Top-left
 		if( texture )
-			glTexCoord2i( 0, 0 );
-		glVertex2d( x1, y1 );
-		
+			Batch.TexCoord2i( 0, 0 );
+		Batch.Vertex2d( x1, y1 );
+
 		// Bottom-left
 		if( texture )
-			glTexCoord2i( 0, 1 );
-		glVertex2d( x1, y2 );
-		
+			Batch.TexCoord2i( 0, 1 );
+		Batch.Vertex2d( x1, y2 );
+
 		// Bottom-right
 		if( texture )
-			glTexCoord2i( 1, 1 );
-		glVertex2d( x2, y2 );
-		
+			Batch.TexCoord2i( 1, 1 );
+		Batch.Vertex2d( x2, y2 );
+
 		// Top-right
 		if( texture )
-			glTexCoord2i( 1, 0 );
-		glVertex2d( x2, y1 );
-		
-	glEnd();
-	
+			Batch.TexCoord2i( 1, 0 );
+		Batch.Vertex2d( x2, y1 );
+
+	Batch.End();
+
 	if( texture )
-		glDisable( GL_TEXTURE_2D );
+		BindTexture( 0 );
 }
 
 
 void Graphics::DrawRect2D( int x1, int y1, int x2, int y2, GLuint texture, float r, float g, float b, float a )
 {
-	glColor4f( r, g, b, a );
-	DrawRect2D( x1, y1, x2, y2, texture );
+	if( texture )
+		BindTexture( texture );
+
+	Batch.Begin( GL_QUADS );
+		Batch.Color4f( r, g, b, a );
+
+		// Top-left
+		if( texture )
+			Batch.TexCoord2i( 0, 0 );
+		Batch.Vertex2i( x1, y1 );
+
+		// Bottom-left
+		if( texture )
+			Batch.TexCoord2i( 0, 1 );
+		Batch.Vertex2i( x1, y2 );
+
+		// Bottom-right
+		if( texture )
+			Batch.TexCoord2i( 1, 1 );
+		Batch.Vertex2i( x2, y2 );
+
+		// Top-right
+		if( texture )
+			Batch.TexCoord2i( 1, 0 );
+		Batch.Vertex2i( x2, y1 );
+
+	Batch.End();
+
+	if( texture )
+		BindTexture( 0 );
 }
 
 
 void Graphics::DrawRect2D( double x1, double y1, double x2, double y2, GLuint texture, float r, float g, float b, float a )
 {
-	glColor4f( r, g, b, a );
-	DrawRect2D( x1, y1, x2, y2, texture );
+	if( texture )
+		BindTexture( texture );
+
+	Batch.Begin( GL_QUADS );
+		Batch.Color4f( r, g, b, a );
+
+		// Top-left
+		if( texture )
+			Batch.TexCoord2i( 0, 0 );
+		Batch.Vertex2d( x1, y1 );
+
+		// Bottom-left
+		if( texture )
+			Batch.TexCoord2i( 0, 1 );
+		Batch.Vertex2d( x1, y2 );
+
+		// Bottom-right
+		if( texture )
+			Batch.TexCoord2i( 1, 1 );
+		Batch.Vertex2d( x2, y2 );
+
+		// Top-right
+		if( texture )
+			Batch.TexCoord2i( 1, 0 );
+		Batch.Vertex2d( x2, y1 );
+
+	Batch.End();
+
+	if( texture )
+		BindTexture( 0 );
 }
 
 
@@ -646,15 +727,15 @@ void Graphics::DrawRect2D( double x1, double y1, double x2, double y2, GLuint te
 
 void Graphics::DrawBox2D( double x1, double y1, double x2, double y2, float line_width, float r, float g, float b, float a )
 {
-	glColor4f( r, g, b, a );
 	glLineWidth( line_width );
-	
-	glBegin( GL_LINE_LOOP );
-		glVertex2d( x1, y1 );
-		glVertex2d( x1, y2 );
-		glVertex2d( x2, y2 );
-		glVertex2d( x2, y1 );
-	glEnd();
+
+	Batch.Begin( GL_LINE_LOOP );
+		Batch.Color4f( r, g, b, a );
+		Batch.Vertex2d( x1, y1 );
+		Batch.Vertex2d( x1, y2 );
+		Batch.Vertex2d( x2, y2 );
+		Batch.Vertex2d( x2, y1 );
+	Batch.End();
 }
 
 
@@ -669,15 +750,14 @@ void Graphics::DrawCircle2D( double x, double y, double r, int res, GLuint textu
 
 void Graphics::DrawCircle2D( double x, double y, double r, int res, GLuint texture, float red, float green, float blue, float alpha )
 {
-	glEnable( GL_TEXTURE_2D );
-	glBindTexture( GL_TEXTURE_2D, texture );
-	glColor4f( red, green, blue, alpha );
-	
-	glBegin( GL_TRIANGLE_FAN );
-		
-		glTexCoord2d( 0.5, 0.5 );
-		glVertex2d( x, y );
-		
+	BindTexture( texture );
+
+	Batch.Begin( GL_TRIANGLE_FAN );
+		Batch.Color4f( red, green, blue, alpha );
+
+		Batch.TexCoord2d( 0.5, 0.5 );
+		Batch.Vertex2d( x, y );
+
 		for( int i = 0; i <= res; i ++ )
 		{
 			double percent = ((double) i) / (double) res;
@@ -687,14 +767,14 @@ void Graphics::DrawCircle2D( double x, double y, double r, int res, GLuint textu
 			double py = y + unit_y * r;
 			double tx = (unit_x + 1.) / 2.;
 			double ty = (unit_y + 1.) / 2.;
-			
-			glTexCoord2d( tx, ty );
-			glVertex2d( px, py );
+
+			Batch.TexCoord2d( tx, ty );
+			Batch.Vertex2d( px, py );
 		}
-		
-	glEnd();
-	
-	glDisable( GL_TEXTURE_2D );
+
+	Batch.End();
+
+	BindTexture( 0 );
 }
 
 
@@ -709,11 +789,11 @@ void Graphics::DrawCircleOutline2D( double x, double y, double r, int res, float
 
 void Graphics::DrawCircleOutline2D( double x, double y, double r, int res, float line_width, float red, float green, float blue, float alpha )
 {
-	glColor4f( red, green, blue, alpha );
 	glLineWidth( line_width );
-	
-	glBegin( GL_LINE_STRIP );
-		
+
+	Batch.Begin( GL_LINE_STRIP );
+		Batch.Color4f( red, green, blue, alpha );
+
 		for( int i = 0; i <= res; i ++ )
 		{
 			double percent = ((double) i) / (double) res;
@@ -721,11 +801,11 @@ void Graphics::DrawCircleOutline2D( double x, double y, double r, int res, float
 			double unit_y = sin( percent * 2. * M_PI );
 			double px = x + unit_x * r;
 			double py = y + unit_y * r;
-			
-			glVertex2d( px, py );
+
+			Batch.Vertex2d( px, py );
 		}
-		
-	glEnd();
+
+	Batch.End();
 }
 
 
@@ -734,13 +814,13 @@ void Graphics::DrawCircleOutline2D( double x, double y, double r, int res, float
 
 void Graphics::DrawLine2D( double x1, double y1, double x2, double y2, float line_width, float r, float g, float b, float a )
 {
-	glColor4f( r, g, b, a );
 	glLineWidth( line_width );
-	
-	glBegin( GL_LINES );
-		glVertex2d( x1, y1 );
-		glVertex2d( x2, y2 );
-	glEnd();
+
+	Batch.Begin( GL_LINES );
+		Batch.Color4f( r, g, b, a );
+		Batch.Vertex2d( x1, y1 );
+		Batch.Vertex2d( x2, y2 );
+	Batch.End();
 }
 
 
@@ -766,12 +846,11 @@ void Graphics::DrawSphere3D( double x, double y, double z, double r, int res, GL
 	double step_vertical = 1. / (double) res_vertical;
 	double step_around = 1. / (double) res_around;
 	
-	glEnable( GL_TEXTURE_2D );
-	glBindTexture( GL_TEXTURE_2D, texture );
-	glColor4f( red, green, blue, alpha );
-	
-	glBegin( GL_QUADS );
-		
+	BindTexture( texture );
+
+	Batch.Begin( GL_QUADS );
+		Batch.Color4f( red, green, blue, alpha );
+
 		for( int i = 0; i < res_vertical; i ++ )
 		{
 			double percent_vertical = ((double) i) / (double) res_vertical;
@@ -779,7 +858,7 @@ void Graphics::DrawSphere3D( double x, double y, double z, double r, int res, GL
 			double r1 = r * sin( percent_vertical * M_PI );
 			double z2 = r * cos( (percent_vertical + step_vertical) * M_PI );
 			double r2 = r * sin( (percent_vertical + step_vertical) * M_PI );
-			
+
 			for( int j = 0; j < res_around; j ++ )
 			{
 				double percent_around = ((double) j) / (double) res_around;
@@ -787,7 +866,7 @@ void Graphics::DrawSphere3D( double x, double y, double z, double r, int res, GL
 				double y1 = sin( percent_around * 2. * M_PI );
 				double x2 = cos( (percent_around + step_around) * 2. * M_PI );
 				double y2 = sin( (percent_around + step_around) * 2. * M_PI );
-				
+
 				// Texture coordinates.
 				double tc[ 4 ][ 2 ];
 				tc[ 0 ][ 0 ] = percent_around;
@@ -798,7 +877,7 @@ void Graphics::DrawSphere3D( double x, double y, double z, double r, int res, GL
 				tc[ 2 ][ 1 ] = percent_vertical + step_vertical;
 				tc[ 3 ][ 0 ] = percent_around + step_around;
 				tc[ 3 ][ 1 ] = percent_vertical;
-				
+
 				// Experimental texture coordinate distortions.
 				if( texture_mode & TEXTURE_MODE_Y_ASIN )
 				{
@@ -818,12 +897,12 @@ void Graphics::DrawSphere3D( double x, double y, double z, double r, int res, GL
 					tc[ 1 ][ 0 ] = percent_around * r2scale + (1. - r2scale) / 2.;
 					tc[ 2 ][ 0 ] = tc[ 1 ][ 0 ] + r2scale * step_around;
 				}
-				
+
 				// Calculate vertices.
 				double px[ 4 ] = { x + r1*x1, x + r2*x1, x + r2*x2, x + r1*x2 };
 				double py[ 4 ] = { y + r1*y1, y + r2*y1, y + r2*y2, y + r1*y2 };
 				double pz[ 2 ] = { z + z1, z + z2 };
-				
+
 				#define SMOOTH 1
 				#if SMOOTH
 					// Calculate per-vertex normals.
@@ -836,44 +915,44 @@ void Graphics::DrawSphere3D( double x, double y, double z, double r, int res, GL
 					if( i == 0 )
 						normal = Vec3D( px[3] - px[2], py[3] - py[2], pz[1] - pz[0] ).Cross( Vec3D( px[1] - px[2], py[1] - py[2], 0. ) );
 					normal.ScaleTo( 1. );
-					glNormal3d( normal.X, normal.Y, normal.Z );
+					Batch.Normal3d( normal.X, normal.Y, normal.Z );
 				#endif
-				
+
 				// Top-left
 				#if SMOOTH
-					glNormal3d( normals[ 0 ].X, normals[ 0 ].Y, normals[ 0 ].Z );
+					Batch.Normal3d( normals[ 0 ].X, normals[ 0 ].Y, normals[ 0 ].Z );
 				#endif
-				glTexCoord2d( tc[ 0 ][ 0 ], tc[ 0 ][ 1 ] );
-				glVertex3d( px[ 0 ], py[ 0 ], pz[ 0 ] );
-				
+				Batch.TexCoord2d( tc[ 0 ][ 0 ], tc[ 0 ][ 1 ] );
+				Batch.Vertex3d( px[ 0 ], py[ 0 ], pz[ 0 ] );
+
 				// Bottom-left
 				#if SMOOTH
-					glNormal3d( normals[ 1 ].X, normals[ 1 ].Y, normals[ 1 ].Z );
+					Batch.Normal3d( normals[ 1 ].X, normals[ 1 ].Y, normals[ 1 ].Z );
 				#endif
-				glTexCoord2d( tc[ 1 ][ 0 ], tc[ 1 ][ 1 ] );
-				glVertex3d( px[ 1 ], py[ 1 ], pz[ 1 ] );
-				
+				Batch.TexCoord2d( tc[ 1 ][ 0 ], tc[ 1 ][ 1 ] );
+				Batch.Vertex3d( px[ 1 ], py[ 1 ], pz[ 1 ] );
+
 				// Bottom-right
 				#if SMOOTH
-					glNormal3d( normals[ 2 ].X, normals[ 2 ].Y, normals[ 2 ].Z );
+					Batch.Normal3d( normals[ 2 ].X, normals[ 2 ].Y, normals[ 2 ].Z );
 				#endif
-				glTexCoord2d( tc[ 2 ][ 0 ], tc[ 2 ][ 1 ] );
-				glVertex3d( px[ 2 ], py[ 2 ], pz[ 1 ] );
-				
+				Batch.TexCoord2d( tc[ 2 ][ 0 ], tc[ 2 ][ 1 ] );
+				Batch.Vertex3d( px[ 2 ], py[ 2 ], pz[ 1 ] );
+
 				// Top-right
 				#if SMOOTH
-					glNormal3d( normals[ 3 ].X, normals[ 3 ].Y, normals[ 3 ].Z );
+					Batch.Normal3d( normals[ 3 ].X, normals[ 3 ].Y, normals[ 3 ].Z );
 				#endif
-				glTexCoord2d( tc[ 3 ][ 0 ], tc[ 3 ][ 1 ] );
-				glVertex3d( px[ 3 ], py[ 3 ], pz[ 0 ] );
-				
+				Batch.TexCoord2d( tc[ 3 ][ 0 ], tc[ 3 ][ 1 ] );
+				Batch.Vertex3d( px[ 3 ], py[ 3 ], pz[ 0 ] );
+
 				#undef SMOOTH
 			}
 		}
-		
-	glEnd();
-	
-	glDisable( GL_TEXTURE_2D );
+
+	Batch.End();
+
+	BindTexture( 0 );
 }
 
 
@@ -882,13 +961,13 @@ void Graphics::DrawSphere3D( double x, double y, double z, double r, int res, GL
 
 void Graphics::DrawLine3D( double x1, double y1, double z1, double x2, double y2, double z2, float line_width, float r, float g, float b, float a )
 {
-	glColor4f( r, g, b, a );
 	glLineWidth( line_width );
-	
-	glBegin( GL_LINES );
-		glVertex3d( x1, y1, z1 );
-		glVertex3d( x2, y2, z2 );
-	glEnd();
+
+	Batch.Begin( GL_LINES );
+		Batch.Color4f( r, g, b, a );
+		Batch.Vertex3d( x1, y1, z1 );
+		Batch.Vertex3d( x2, y2, z2 );
+	Batch.End();
 }
 
 
@@ -906,33 +985,35 @@ void Graphics::DrawBox3D( const Pos3D *corner, const Vec3D *fwd, const Vec3D *up
 	Vec3D rtr = rbr + *up;
 	Vec3D ftr = fbr + *up;
 	
-	glColor4f( r, g, b, a );
 	glLineWidth( line_width );
-	
-	glBegin( GL_LINE_LOOP );
-		glVertex3d( rbl.X, rbl.Y, rbl.Z );
-		glVertex3d( fbl.X, fbl.Y, fbl.Z );
-		glVertex3d( fbr.X, fbr.Y, fbr.Z );
-		glVertex3d( rbr.X, rbr.Y, rbr.Z );
-	glEnd();
-	
-	glBegin( GL_LINE_LOOP );
-		glVertex3d( rtl.X, rtl.Y, rtl.Z );
-		glVertex3d( ftl.X, ftl.Y, ftl.Z );
-		glVertex3d( ftr.X, ftr.Y, ftr.Z );
-		glVertex3d( rtr.X, rtr.Y, rtr.Z );
-	glEnd();
-	
-	glBegin( GL_LINES );
-		glVertex3d( rtl.X, rtl.Y, rtl.Z );
-		glVertex3d( rbl.X, rbl.Y, rbl.Z );
-		glVertex3d( ftl.X, ftl.Y, ftl.Z );
-		glVertex3d( fbl.X, fbl.Y, fbl.Z );
-		glVertex3d( ftr.X, ftr.Y, ftr.Z );
-		glVertex3d( fbr.X, fbr.Y, fbr.Z );
-		glVertex3d( rtr.X, rtr.Y, rtr.Z );
-		glVertex3d( rbr.X, rbr.Y, rbr.Z );
-	glEnd();
+
+	Batch.Begin( GL_LINE_LOOP );
+		Batch.Color4f( r, g, b, a );
+		Batch.Vertex3d( rbl.X, rbl.Y, rbl.Z );
+		Batch.Vertex3d( fbl.X, fbl.Y, fbl.Z );
+		Batch.Vertex3d( fbr.X, fbr.Y, fbr.Z );
+		Batch.Vertex3d( rbr.X, rbr.Y, rbr.Z );
+	Batch.End();
+
+	Batch.Begin( GL_LINE_LOOP );
+		Batch.Color4f( r, g, b, a );
+		Batch.Vertex3d( rtl.X, rtl.Y, rtl.Z );
+		Batch.Vertex3d( ftl.X, ftl.Y, ftl.Z );
+		Batch.Vertex3d( ftr.X, ftr.Y, ftr.Z );
+		Batch.Vertex3d( rtr.X, rtr.Y, rtr.Z );
+	Batch.End();
+
+	Batch.Begin( GL_LINES );
+		Batch.Color4f( r, g, b, a );
+		Batch.Vertex3d( rtl.X, rtl.Y, rtl.Z );
+		Batch.Vertex3d( rbl.X, rbl.Y, rbl.Z );
+		Batch.Vertex3d( ftl.X, ftl.Y, ftl.Z );
+		Batch.Vertex3d( fbl.X, fbl.Y, fbl.Z );
+		Batch.Vertex3d( ftr.X, ftr.Y, ftr.Z );
+		Batch.Vertex3d( fbr.X, fbr.Y, fbr.Z );
+		Batch.Vertex3d( rtr.X, rtr.Y, rtr.Z );
+		Batch.Vertex3d( rbr.X, rbr.Y, rbr.Z );
+	Batch.End();
 }
 
 
@@ -1046,7 +1127,6 @@ GLuint Graphics::MakeTexture( SDL_Surface *surface, GLint texture_filter, GLint 
 	GLuint texture = 0;
 	glGenTextures( 1, &texture );
 	glBindTexture( GL_TEXTURE_2D, texture );
-	glEnable( GL_TEXTURE_2D );
 	
 	// Set the texture's wrapping option (repeat/clamp).
 	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, texture_wrap );
@@ -1063,12 +1143,57 @@ GLuint Graphics::MakeTexture( SDL_Surface *surface, GLint texture_filter, GLint 
 	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA, surface->w, surface->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, surface->pixels );
 	
 	if( mipmap )
-		// This is the most compatible mipmap mode and seems to have no downsides.
-		gluBuild2DMipmaps( GL_TEXTURE_2D, GL_RGBA, surface->w, surface->h, GL_RGBA, GL_UNSIGNED_BYTE, surface->pixels );
+		glGenerateMipmap( GL_TEXTURE_2D );
 	
 	// Free any temporary surfaces we had to create.
 	for( std::vector<SDL_Surface*>::iterator surf_iter = allocated.begin(); surf_iter != allocated.end(); surf_iter ++ )
 		SDL_FreeSurface( *surf_iter );
-	
+
 	return texture;
+}
+
+
+void Graphics::PushMatrix( void )
+{
+	MatrixStack.push_back( { ProjectionMatrix, ModelViewMatrix } );
+}
+
+
+void Graphics::PopMatrix( void )
+{
+	if( ! MatrixStack.empty() )
+	{
+		ProjectionMatrix = MatrixStack.back().Proj;
+		ModelViewMatrix  = MatrixStack.back().MV;
+		MatrixStack.pop_back();
+		UploadMatrices();
+	}
+}
+
+
+void Graphics::UploadMatrices( void )
+{
+	GLint program = 0;
+	glGetIntegerv( GL_CURRENT_PROGRAM, &program );
+	if( ! program )
+		return;
+
+	float proj[ 16 ], mv[ 16 ];
+	ProjectionMatrix.ToFloat( proj );
+	ModelViewMatrix.ToFloat( mv );
+
+	GLint loc = glGetUniformLocation( program, "uProjection" );
+	if( loc >= 0 )
+		glUniformMatrix4fv( loc, 1, GL_FALSE, proj );
+
+	loc = glGetUniformLocation( program, "uModelView" );
+	if( loc >= 0 )
+		glUniformMatrix4fv( loc, 1, GL_FALSE, mv );
+}
+
+
+void Graphics::BindTexture( GLuint texture )
+{
+	glBindTexture( GL_TEXTURE_2D, texture );
+	TextureEnabled = (texture != 0);
 }

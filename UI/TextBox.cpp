@@ -113,19 +113,19 @@ TextBox::~TextBox()
 
 void TextBox::Draw( void )
 {
-	if( IsSelected() )
-		glColor4f( SelectedRed, SelectedGreen, SelectedBlue, SelectedAlpha );
-	else
-		glColor4f( Red, Green, Blue, Alpha );
-	
-	glBegin( GL_QUADS );
-		
-		glVertex2i( 0, 0 );
-		glVertex2i( CalcRect.w, 0 );
-		glVertex2i( CalcRect.w, CalcRect.h );
-		glVertex2i( 0, CalcRect.h );
-		
-	glEnd();
+	DynamicBatch &Batch = Raptor::Game->Gfx.Batch;
+	Batch.Begin( GL_QUADS );
+		if( IsSelected() )
+			Batch.Color4f( SelectedRed, SelectedGreen, SelectedBlue, SelectedAlpha );
+		else
+			Batch.Color4f( Red, Green, Blue, Alpha );
+
+		Batch.Vertex2i( 0, 0 );
+		Batch.Vertex2i( CalcRect.w, 0 );
+		Batch.Vertex2i( CalcRect.w, CalcRect.h );
+		Batch.Vertex2i( 0, CalcRect.h );
+
+	Batch.End();
 	
 	if( TextFont )
 	{

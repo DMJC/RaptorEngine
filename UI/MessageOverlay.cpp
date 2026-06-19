@@ -81,7 +81,7 @@ void MessageOverlay::UpdateRects( void )
 
 void MessageOverlay::Draw( void )
 {
-	glPushMatrix();
+	Raptor::Game->Gfx.PushMatrix();
 	
 	UpdateRects();
 	DrawSetup();
@@ -163,5 +163,5 @@ void MessageOverlay::Draw( void )
 			fprintf( stderr, "MessageOverlay::Draw: SDL_mutexP(Lock): %s\n", SDL_GetError() );
 	}
 	
-	glPopMatrix();
+	Raptor::Game->Gfx.PopMatrix();
 }

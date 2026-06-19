@@ -5,6 +5,8 @@
 #include "Shader.h"
 
 #include <cstddef>
+#include <algorithm>
+#include <string>
 #include "File.h"
 #include "RaptorGame.h"
 
@@ -327,7 +329,8 @@ ShaderComponent::ShaderComponent( ShaderComponentType type, std::string filename
 		if( ShaderHandle )
 		{
 			// First add definitions.
-			SourceCode = std::string("#version ") + Raptor::Game->Cfg.SettingAsString("g_shader_version","110") + std::string("\n");
+			int shader_version = std::max( 330, Raptor::Game->Cfg.SettingAsInt("g_shader_version", 330) );
+			SourceCode = std::string("#version ") + std::to_string(shader_version) + std::string(" core\n");
 			for( std::map<std::string,std::string>::iterator def_iter = defs.begin(); def_iter != defs.end(); def_iter ++ )
 			{
 				if( Str::EqualsInsensitive( def_iter->second, "true" ) )

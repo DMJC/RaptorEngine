@@ -464,22 +464,20 @@ void RaptorGame::Run( void )
 					float y1 = y / (float) Head.EyeR->H;
 					float x2 = (Head.EyeR->W - x) / (float) Head.EyeR->W;
 					float y2 = (Head.EyeR->H - y) / (float) Head.EyeR->H;
-					glColor4f( 1.f, 1.f, 1.f, 1.f );
-					glEnable( GL_TEXTURE_2D );
-					glBindTexture( GL_TEXTURE_2D, Head.EyeR->Texture );
-					glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP );
-					glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP );
-					glBegin( GL_QUADS );
-						glTexCoord2f( x1, y2 );
-						glVertex2d( 0, 0 );
-						glTexCoord2f( x1, y1 );
-						glVertex2d( 0, Gfx.RealH );
-						glTexCoord2f( x2, y1 );
-						glVertex2d( Gfx.RealW, Gfx.RealH );
-						glTexCoord2f( x2, y2 );
-						glVertex2d( Gfx.RealW, 0 );
-					glEnd();
-					glDisable( GL_TEXTURE_2D );
+					Gfx.BindTexture( Head.EyeR->Texture );
+					glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+					glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+					Gfx.Batch.Begin( GL_QUADS );
+						Gfx.Batch.TexCoord2f( x1, y2 );
+						Gfx.Batch.Vertex2d( 0, 0 );
+						Gfx.Batch.TexCoord2f( x1, y1 );
+						Gfx.Batch.Vertex2d( 0, Gfx.RealH );
+						Gfx.Batch.TexCoord2f( x2, y1 );
+						Gfx.Batch.Vertex2d( Gfx.RealW, Gfx.RealH );
+						Gfx.Batch.TexCoord2f( x2, y2 );
+						Gfx.Batch.Vertex2d( Gfx.RealW, 0 );
+					Gfx.Batch.End();
+					Gfx.BindTexture( 0 );
 					Gfx.SwapBuffers();
 				}
 			}

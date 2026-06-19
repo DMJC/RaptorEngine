@@ -131,20 +131,21 @@ void ScrollArea::UpdateCalcRects( int offset_x, int offset_y )
 
 void ScrollArea::Draw( void )
 {
-	glColor4f( Red, Green, Blue, Alpha );
-	glBegin( GL_QUADS );
-		glVertex2i( 0, 0 );
-		glVertex2i( Rect.w, 0 );
-		glVertex2i( Rect.w, Rect.h );
-		glVertex2i( 0, Rect.h );
-	glEnd();
-	glColor4f( 1.f, 1.f, 1.f, 1.f );
+	DynamicBatch &Batch = Raptor::Game->Gfx.Batch;
+	Batch.Begin( GL_QUADS );
+		Batch.Color4f( Red, Green, Blue, Alpha );
+		Batch.Vertex2i( 0, 0 );
+		Batch.Vertex2i( Rect.w, 0 );
+		Batch.Vertex2i( Rect.w, Rect.h );
+		Batch.Vertex2i( 0, Rect.h );
+	Batch.End();
 }
 
 
 void ScrollArea::DrawElements( void )
 {
-	glPushAttrib( GL_VIEWPORT_BIT );
+	GLint savedViewport[4];
+	glGetIntegerv( GL_VIEWPORT, savedViewport );
 	Raptor::Game->Gfx.SetViewport( CalcRect.x, CalcRect.y, CalcRect.w, CalcRect.h );
 	// FIXME: While this does work because only the main client thread should use Gfx.W/Gfx.H, there must be a cleaner way!
 	int gfx_w = Raptor::Game->Gfx.W, gfx_h = Raptor::Game->Gfx.H;
@@ -166,7 +167,7 @@ void ScrollArea::DrawElements( void )
 	Raptor::Game->Gfx.W = gfx_w;
 	Raptor::Game->Gfx.H = gfx_h;
 	UpdateCalcRects();
-	glPopAttrib();
+	glViewport( savedViewport[0], savedViewport[1], savedViewport[2], savedViewport[3] );
 	
 	// Draw the scrollbar.
 	DrawSetup();

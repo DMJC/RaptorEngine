@@ -20,14 +20,33 @@ class Graphics;
 #endif
 
 #include <string>
+#include <vector>
 #include "RaptorGL.h"
 #include "Camera.h"
 #include "Framebuffer.h"
+#include "DynamicBatch.h"
+#include "Mat4.h"
 
+class Shader;
 
 class Graphics
 {
 public:
+	DynamicBatch Batch;
+	Mat4 ProjectionMatrix;
+	Mat4 ModelViewMatrix;
+	double CamX, CamY, CamZ;
+
+	struct MatrixState { Mat4 Proj; Mat4 MV; };
+	std::vector<MatrixState> MatrixStack;
+
+	Shader *BatchShader;
+	bool TextureEnabled;
+
+	void PushMatrix( void );
+	void PopMatrix( void );
+	void UploadMatrices( void );
+	void BindTexture( GLuint texture );
 #if SDL_VERSION_ATLEAST(2,0,0)
 	SDL_Window *Screen;
 #else

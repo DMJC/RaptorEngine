@@ -46,29 +46,34 @@ bool ShaderManager::Initialize( void )
 void ShaderManager::Select( Shader *shader )
 {
 	bool active = Active();
-	
+
 	Selected = shader;
-	
+
 	if( active )
+	{
 		glUseProgram( Selected->ProgramHandle );
+		Raptor::Game->Gfx.UploadMatrices();
+	}
 }
 
 
 void ShaderManager::SelectAndCopyVars( Shader *shader )
 {
 	bool active = Active();
-	
+
 	if( Ready() && shader && (shader != Selected) && shader->Ready() )
 	{
 		// OpenGL documentation says we should use the shader before setting its variables.
 		glUseProgram( shader->ProgramHandle );
-		
+
 		shader->CopyVarsFrom( Selected );
-		
+
 		if( ! active )
 			glUseProgram( 0 );
+		else
+			Raptor::Game->Gfx.UploadMatrices();
 	}
-	
+
 	Selected = shader;
 }
 
@@ -86,9 +91,12 @@ void ShaderManager::ResumeShaders( void )
 {
 	if( ! Initialized )
 		return;
-	
+
 	if( Selected )
+	{
 		glUseProgram( Selected->ProgramHandle );
+		Raptor::Game->Gfx.UploadMatrices();
+	}
 }
 
 

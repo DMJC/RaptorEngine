@@ -83,7 +83,7 @@ void Font::LoadChar( char c )
 	if( (! Glyphs[ (unsigned char) c ].Tex ) && Glyphs[ (unsigned char) c ].Pic )
 	{
 		GLfloat texcoord[ 4 ] = { 0.0f, 0.0f, 0.0f, 0.0f };
-		Glyphs[ (unsigned char) c ].Tex = Raptor::Game->Gfx.MakeTexture( Glyphs[ (unsigned char) c ].Pic, GL_LINEAR, GL_CLAMP, texcoord );
+		Glyphs[ (unsigned char) c ].Tex = Raptor::Game->Gfx.MakeTexture( Glyphs[ (unsigned char) c ].Pic, GL_LINEAR, GL_CLAMP_TO_EDGE, texcoord );
 		Glyphs[ (unsigned char) c ].TexMinX = texcoord[ 0 ];
 		Glyphs[ (unsigned char) c ].TexMinY = texcoord[ 1 ];
 		Glyphs[ (unsigned char) c ].TexMaxX = texcoord[ 2 ];
@@ -244,13 +244,9 @@ void Font::DrawText( std::string text, int x, int y, uint8_t align, float r, flo
 	GLfloat min_x = 0.0f;
 	GLfloat base_left = x;
 	
-	glPushAttrib( GL_ALL_ATTRIB_BITS );
 	
 	glEnable( GL_BLEND );
 	glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
-	
-	glEnable( GL_TEXTURE_2D );
-	glColor4f( r, g, b, a );
 	
 	// Adjust for text horizontal alignment.
 	int line_width = LineWidth( text ) * scale;
@@ -269,7 +265,7 @@ void Font::DrawText( std::string text, int x, int y, uint8_t align, float r, flo
 			x -= line_width;
 			break;
 	}
-	
+
 	GLfloat xf = x;
 	const char *text_ptr = text.c_str();
 	while( *text_ptr != '\0' )
@@ -278,7 +274,7 @@ void Font::DrawText( std::string text, int x, int y, uint8_t align, float r, flo
 		{
 			x = base_left;
 			y += LineSkip * scale;
-			
+
 			// Adjust for text horizontal alignment.
 			line_width = LineWidth( text_ptr + 1 ) * scale;
 			switch( align )
@@ -296,42 +292,43 @@ void Font::DrawText( std::string text, int x, int y, uint8_t align, float r, flo
 					x -= line_width;
 					break;
 			}
-			
+
 			xf = x;
 		}
 		else
 		{
 			LoadChar( *text_ptr );
-			
+
 			tex_min_x = Glyphs[ (unsigned char) *text_ptr ].TexMinX;
 			tex_min_y = Glyphs[ (unsigned char) *text_ptr ].TexMinY;
 			tex_max_x = Glyphs[ (unsigned char) *text_ptr ].TexMaxX;
 			tex_max_y = Glyphs[ (unsigned char) *text_ptr ].TexMaxY;
-			
+
 			min_x = Glyphs[ (unsigned char) *text_ptr ].MinX;
-			
+
 			left = xf + min_x * scale;
 			right = xf + (Glyphs[ (unsigned char) *text_ptr ].Pic->w + min_x) * scale;
 			top = y;
 			bottom = y + Glyphs[ (unsigned char) *text_ptr ].Pic->h * scale;
-			
-			glBindTexture( GL_TEXTURE_2D, Glyphs[ (unsigned char) *text_ptr ].Tex );
-			
-			glBegin( GL_QUADS );
-				glTexCoord2f( tex_min_x, tex_min_y ); glVertex2f( left, top );
-				glTexCoord2f( tex_max_x, tex_min_y ); glVertex2f( right, top );
-				glTexCoord2f( tex_max_x, tex_max_y ); glVertex2f( right, bottom );
-				glTexCoord2f( tex_min_x, tex_max_y ); glVertex2f( left, bottom );
-			glEnd();
-			
+
+			Raptor::Game->Gfx.BindTexture( Glyphs[ (unsigned char) *text_ptr ].Tex );
+
+			DynamicBatch &Batch = Raptor::Game->Gfx.Batch;
+			Batch.Begin( GL_QUADS );
+				Batch.Color4f( r, g, b, a );
+				Batch.TexCoord2f( tex_min_x, tex_min_y ); Batch.Vertex2f( left, top );
+				Batch.TexCoord2f( tex_max_x, tex_min_y ); Batch.Vertex2f( right, top );
+				Batch.TexCoord2f( tex_max_x, tex_max_y ); Batch.Vertex2f( right, bottom );
+				Batch.TexCoord2f( tex_min_x, tex_max_y ); Batch.Vertex2f( left, bottom );
+			Batch.End();
+
 			xf += Glyphs[ (unsigned char) *text_ptr ].Advance * scale;
 			x = xf;
 		}
-		
+
 		text_ptr ++;
 	}
 	
-	glPopAttrib();
 }
 
 
@@ -452,13 +449,9 @@ void Font::DrawText3D( std::string text, const Pos3D *pos, uint8_t align, float 
 	GLdouble min_x = 0.;
 	GLdouble base_left = x;
 	
-	glPushAttrib( GL_ALL_ATTRIB_BITS );
 	
 	glEnable( GL_BLEND );
 	glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
-	
-	glEnable( GL_TEXTURE_2D );
-	glColor4f( r, g, b, a );
 	
 	// Adjust for text horizontal alignment.
 	int line_width = LineWidth( text );
@@ -477,7 +470,7 @@ void Font::DrawText3D( std::string text, const Pos3D *pos, uint8_t align, float 
 			x -= line_width;
 			break;
 	}
-	
+
 	const char *text_ptr = text.c_str();
 	while( *text_ptr != '\0' )
 	{
@@ -485,7 +478,7 @@ void Font::DrawText3D( std::string text, const Pos3D *pos, uint8_t align, float 
 		{
 			x = base_left;
 			y += LineSkip;
-			
+
 			// Adjust for text horizontal alignment.
 			line_width = LineWidth( text_ptr + 1 );
 			switch( align )
@@ -507,19 +500,19 @@ void Font::DrawText3D( std::string text, const Pos3D *pos, uint8_t align, float 
 		else
 		{
 			LoadChar( *text_ptr );
-			
+
 			tex_min_x = Glyphs[ (unsigned char) *text_ptr ].TexMinX;
 			tex_min_y = Glyphs[ (unsigned char) *text_ptr ].TexMinY;
 			tex_max_x = Glyphs[ (unsigned char) *text_ptr ].TexMaxX;
 			tex_max_y = Glyphs[ (unsigned char) *text_ptr ].TexMaxY;
-			
+
 			min_x = Glyphs[ (unsigned char) *text_ptr ].MinX;
-			
+
 			left = x + min_x;
 			right = x + Glyphs[ (unsigned char) *text_ptr ].Pic->w + min_x;
 			top = y;
 			bottom = y + Glyphs[ (unsigned char) *text_ptr ].Pic->h;
-			
+
 			tl.Copy( pos );
 			tl.MoveAlong( &(pos->Right), left * scale );
 			tl.MoveAlong( &(pos->Up), -top * scale );
@@ -532,23 +525,24 @@ void Font::DrawText3D( std::string text, const Pos3D *pos, uint8_t align, float 
 			bl.Copy( pos );
 			bl.MoveAlong( &(pos->Right), left * scale );
 			bl.MoveAlong( &(pos->Up), -bottom * scale );
-			
-			glBindTexture( GL_TEXTURE_2D, Glyphs[ (unsigned char) *text_ptr ].Tex );
-			
-			glBegin( GL_QUADS );
-				glTexCoord2f( tex_min_x, tex_min_y ); glVertex3d( tl.X, tl.Y, tl.Z );
-				glTexCoord2f( tex_max_x, tex_min_y ); glVertex3d( tr.X, tr.Y, tr.Z );
-				glTexCoord2f( tex_max_x, tex_max_y ); glVertex3d( br.X, br.Y, br.Z );
-				glTexCoord2f( tex_min_x, tex_max_y ); glVertex3d( bl.X, bl.Y, bl.Z );
-			glEnd();
-			
+
+			Raptor::Game->Gfx.BindTexture( Glyphs[ (unsigned char) *text_ptr ].Tex );
+
+			DynamicBatch &Batch = Raptor::Game->Gfx.Batch;
+			Batch.Begin( GL_QUADS );
+				Batch.Color4f( r, g, b, a );
+				Batch.TexCoord2f( tex_min_x, tex_min_y ); Batch.Vertex3d( tl.X, tl.Y, tl.Z );
+				Batch.TexCoord2f( tex_max_x, tex_min_y ); Batch.Vertex3d( tr.X, tr.Y, tr.Z );
+				Batch.TexCoord2f( tex_max_x, tex_max_y ); Batch.Vertex3d( br.X, br.Y, br.Z );
+				Batch.TexCoord2f( tex_min_x, tex_max_y ); Batch.Vertex3d( bl.X, bl.Y, bl.Z );
+			Batch.End();
+
 			x += Glyphs[ (unsigned char) *text_ptr ].Advance;
 		}
-		
+
 		text_ptr ++;
 	}
 	
-	glPopAttrib();
 }
 
 
